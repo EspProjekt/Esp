@@ -16,12 +16,19 @@
 
 
 void run_server();
+
 void connect_to_wifi();
+
 void switch_light();
+
 void register_endpoints(httpd_handle_t server, httpd_uri_t* handlers, size_t num_handlers);
+
 esp_err_t status_endpoint(httpd_req_t *request);
+
 esp_err_t light_switch_endpoint(httpd_req_t *request);
+
 httpd_uri_t* create_handlers(size_t *num_handlers);
+
 httpd_uri_t create_endpoint_handler(
     httpd_method_t method,
     const char *uri, esp_err_t (*handler)(httpd_req_t *request)
@@ -97,7 +104,7 @@ httpd_uri_t* create_handlers(size_t *handlers_count) {
     }
 
     // tu mozna dodac w prosty sposob kolejne endpointy, trzeba zmineic *handlers_count
-    handlers[0] = create_endpoint_handler(HTTP_GET, "/", status_endpoint);
+    handlers[0] = create_endpoint_handler(HTTP_GET, "/health", status_endpoint);
     handlers[1] = create_endpoint_handler(HTTP_POST, "/light", light_switch_endpoint);
     
     return handlers;
