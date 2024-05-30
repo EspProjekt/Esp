@@ -12,23 +12,25 @@
 #define TICK_DELAY (BLINK_PERIOD / portTICK_PERIOD_MS)
 #define WIFI_SSID "WolfnetMesh"
 #define WIFI_PASSWD "koziadupa6666"
-#define MAX_ITERATIONS (100)
 
 
 
-void open_http_server();
+void run_server();
 void connect_to_wifi();
 void switch_light();
 void register_endpoints(httpd_handle_t server, httpd_uri_t* handlers, size_t num_handlers);
 esp_err_t status_endpoint(httpd_req_t *request);
 esp_err_t light_switch_endpoint(httpd_req_t *request);
 httpd_uri_t* create_handlers(size_t *num_handlers);
+httpd_uri_t create_endpoint_handler(
+    httpd_method_t method,
+    const char *uri, esp_err_t (*handler)(httpd_req_t *request)
+);
 
 
 
 static const char *TAG = "MAIN";
 int iterations = 0;
-int max_iterations_passed = 0;
 bool is_light_on = false;
 
 
@@ -38,15 +40,13 @@ void app_main(void){
     esp_log_level_set(TAG, ESP_LOG_DEBUG);
 
     connect_to_wifi();
-    open_http_server();
+    run_server();
 
     while (true){
         vTaskDelay(TICK_DELAY);
         ESP_LOGE(TAG, "iter: %d", iterations);
-
         iterations += 1;
-
-        if (iterations % MAX_ITERATIONS == 0) { max_iterations_passed += 1; }
+        
     }
 }
 
@@ -74,43 +74,43 @@ void connect_to_wifi(){
 
 
 
-
-httpd_uri_t create_endpoint_handler(httpd_method_t method, const char *uri, esp_err_t (*handler)(httpd_req_t *request)) {
-    httpd_uri_t endpoint_handler = {
-        .method = method,
-        .uri = uri,
-        .handler = handler
-    };
-    return endpoint_handler;
-}
-
-
-
-void open_http_server(){
+void run_server(){
     httpd_config_t httpd_cfg = HTTPD_DEFAULT_CONFIG();
     httpd_handle_t httpd_handle;
 
     httpd_start(&httpd_handle, &httpd_cfg);
 
-    size_t num_handlers;
-    httpd_uri_t* handlers = create_handlers(&num_handlers);
-    register_endpoints(httpd_handle, handlers, num_handlers);
+    size_t handlers_count;
+    httpd_uri_t* handlers = create_handlers(&handlers_count);
+    register_endpoints(httpd_handle, handlers, handlers_count);
 }
 
 
 
-httpd_uri_t* create_handlers(size_t *num_handlers) {
-    *num_handlers = 2; 
-    httpd_uri_t* handlers = malloc(*num_handlers * sizeof(httpd_uri_t));
+httpd_uri_t* create_handlers(size_t *handlers_count) {
+    *handlers_count = 2; 
+    httpd_uri_t* handlers = malloc(*handlers_count * sizeof(httpd_uri_t));
 
     if (handlers == NULL) {
         ESP_LOGE(TAG, "Failed to allocate memory for handlers");
         return NULL;
     }
 
+    // tu mozna dodac w prosty sposob kolejne endpointy, trzeba zmineic *handlers_count
     handlers[0] = create_endpoint_handler(HTTP_GET, "/", status_endpoint);
     handlers[1] = create_endpoint_handler(HTTP_POST, "/light", light_switch_endpoint);
+    
     return handlers;
+}
+
+
+
+httpd_uri_t create_endpoint_handler(httpd_method_t method, const char *uri, esp_err_t (*handler)(httpd_req_t *request)) {
+    return (httpd_uri_t){
+        .method = method,
+        .uri = uri,
+        .handler = handler
+    };
 }
 
 
@@ -125,9 +125,8 @@ void register_endpoints(httpd_handle_t server, httpd_uri_t* handlers, size_t num
 
 esp_err_t status_endpoint(httpd_req_t *request){
     char response_str[100];
-    int total_iterations = max_iterations_passed * MAX_ITERATIONS + iterations;
 
-    sprintf(response_str, "{\"uptime\":%d, \"light\": %s}", total_iterations, is_light_on ? "true" : "false");
+    sprintf(response_str, "{\"uptime\":%d, \"light\": %s}", iterations, is_light_on ? "true" : "false");
 
     httpd_resp_set_type(request, "application/json");
     httpd_resp_sendstr(request, response_str);
@@ -146,6 +145,7 @@ esp_err_t light_switch_endpoint(httpd_req_t *request){
     httpd_resp_sendstr(request, response_str);
     return ESP_OK;
 }
+
 
 
 void switch_light(){
