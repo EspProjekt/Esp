@@ -146,7 +146,7 @@ esp_err_t light_switch_endpoint(httpd_req_t *request){
     char response_str[100];
     
     switch_light();
-    sprintf(response_str, "{\"status\": %s}", is_light_on ? "true" : "false");
+    sprintf(response_str, "{\"light\": %s}", is_light_on ? "true" : "false");
     
     httpd_resp_set_type(request, "application/json");
     httpd_resp_sendstr(request, response_str);
