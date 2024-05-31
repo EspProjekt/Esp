@@ -5,7 +5,8 @@
 #include <nvs_flash.h>
 #include <esp_wifi.h>
 #include <esp_http_server.h>
-
+#include <string.h>
+#include <stdlib.h>
 
 
 #define BLINK_PERIOD (1000)
@@ -16,19 +17,16 @@
 
 
 void run_server();
-
 void connect_to_wifi();
-
-void switch_light();
-
+void status_func(char *response_str);
+void light_switch_func(char *response_str);
 void register_endpoints(httpd_handle_t server, httpd_uri_t* handlers, size_t num_handlers);
 
 esp_err_t status_endpoint(httpd_req_t *request);
-
 esp_err_t light_switch_endpoint(httpd_req_t *request);
+esp_err_t endpoint(httpd_req_t *request, void (*func)(char *response_str));
 
-httpd_uri_t* create_handlers(size_t *num_handlers);
-
+httpd_uri_t* create_endpoints(size_t *num_handlers);
 httpd_uri_t create_endpoint_handler(
     httpd_method_t method,
     const char *uri, esp_err_t (*handler)(httpd_req_t *request)
@@ -45,7 +43,6 @@ bool is_light_on = false;
 void app_main(void){
     gpio_set_direction(GPIO_NUM_2, GPIO_MODE_OUTPUT);
     esp_log_level_set(TAG, ESP_LOG_DEBUG);
-
     connect_to_wifi();
     run_server();
 
@@ -53,7 +50,6 @@ void app_main(void){
         vTaskDelay(TICK_DELAY);
         ESP_LOGE(TAG, "iter: %d", iterations);
         iterations += 1;
-        
     }
 }
 
@@ -82,80 +78,76 @@ void connect_to_wifi(){
 
 
 void run_server(){
+    size_t endpoints_count;
+    httpd_uri_t* handlers = create_endpoints(&endpoints_count);
     httpd_config_t httpd_cfg = HTTPD_DEFAULT_CONFIG();
     httpd_handle_t httpd_handle;
 
     httpd_start(&httpd_handle, &httpd_cfg);
-
-    size_t handlers_count;
-    httpd_uri_t* handlers = create_handlers(&handlers_count);
-    register_endpoints(httpd_handle, handlers, handlers_count);
+    register_endpoints(httpd_handle, handlers, endpoints_count);
 }
 
 
 
-httpd_uri_t* create_handlers(size_t *handlers_count) {
-    *handlers_count = 2; 
-    httpd_uri_t* handlers = malloc(*handlers_count * sizeof(httpd_uri_t));
+httpd_uri_t* create_endpoints(size_t *endpoints_count) {
+    *endpoints_count = 2; 
+    httpd_uri_t* endpoints = malloc(*endpoints_count * sizeof(httpd_uri_t));
 
-    if (handlers == NULL) {
-        ESP_LOGE(TAG, "Failed to allocate memory for handlers");
-        return NULL;
-    }
-
-    // tu mozna dodac w prosty sposob kolejne endpointy, trzeba zmineic *handlers_count
-    handlers[0] = create_endpoint_handler(HTTP_GET, "/health", status_endpoint);
-    handlers[1] = create_endpoint_handler(HTTP_POST, "/light", light_switch_endpoint);
+    // tu mozna dodac w prosty sposob kolejne endpointy, trzeba zmineic *endpoints_count
+    endpoints[0] = create_endpoint_handler(HTTP_GET, "/status", status_endpoint);
+    endpoints[1] = create_endpoint_handler(HTTP_POST, "/light", light_switch_endpoint);
     
-    return handlers;
+    return endpoints;
 }
 
 
 
-httpd_uri_t create_endpoint_handler(httpd_method_t method, const char *uri, esp_err_t (*handler)(httpd_req_t *request)) {
+httpd_uri_t create_endpoint_handler(
+    httpd_method_t method,
+    const char *uri,
+    esp_err_t (*handler)(httpd_req_t *request)
+) {
     return (httpd_uri_t){
         .method = method,
         .uri = uri,
-        .handler = handler
+        .handler = handler,
     };
 }
 
 
 
-void register_endpoints(httpd_handle_t server, httpd_uri_t* handlers, size_t num_handlers) {
-    for (size_t i = 0; i < num_handlers; i++) {
-        httpd_register_uri_handler(server, &handlers[i]);
+void register_endpoints(httpd_handle_t server, httpd_uri_t* endpoints, size_t endpoints_count) {
+    for (size_t i = 0; i < endpoints_count; i++) {
+        httpd_register_uri_handler(server, &endpoints[i]);
     }
 }
 
 
 
-esp_err_t status_endpoint(httpd_req_t *request){
+esp_err_t endpoint(httpd_req_t *request, void (*func)(char *response_str)) {
     char response_str[100];
+    func(response_str);
 
+    httpd_resp_set_type(request, "application/json");
+    httpd_resp_sendstr(request, response_str);
+    return ESP_OK;
+}
+
+
+
+esp_err_t status_endpoint(httpd_req_t *request) { return endpoint(request, status_func); }
+esp_err_t light_switch_endpoint(httpd_req_t *request) { return endpoint(request, light_switch_func); }
+
+
+
+void status_func(char *response_str) {
     sprintf(response_str, "{\"uptime\":%d, \"light\": %s}", iterations, is_light_on ? "true" : "false");
-
-    httpd_resp_set_type(request, "application/json");
-    httpd_resp_sendstr(request, response_str);
-    return ESP_OK;
 }
 
 
 
-esp_err_t light_switch_endpoint(httpd_req_t *request){
-    char response_str[100];
-    
-    switch_light();
-    sprintf(response_str, "{\"light\": %s}", is_light_on ? "true" : "false");
-    
-    httpd_resp_set_type(request, "application/json");
-    httpd_resp_sendstr(request, response_str);
-    return ESP_OK;
-}
-
-
-
-void switch_light(){
+void light_switch_func(char *response_str) {
     is_light_on = !is_light_on;
     gpio_set_level(GPIO_NUM_2, is_light_on);
+    sprintf(response_str, "{\"light\": %s}", is_light_on ? "true" : "false");
 }
