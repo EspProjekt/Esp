@@ -22,6 +22,8 @@
         "esp_spiffs.h": "c",
         "esp_log.h": "c",
         "string.h": "c",
-        "stdlib.h": "c"
+        "stdlib.h": "c",
+        "esp_http_client.h": "c",
+        "freertos.h": "c"
     }
 }
