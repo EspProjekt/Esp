@@ -52,6 +52,8 @@ void blink(blink_data props);
 
 void switch_light();
 
+void switch_light_with_dealy(int delay);
+
 void status_endpoint_func(char *response_str);
 
 void light_switch_endpoint_func(char *response_str);
@@ -297,9 +299,13 @@ void switch_light(){
 
 void blink(blink_data props){
     for (int i = 0; i < props.blinks_count; i++) {
-        switch_light();
-        vTaskDelay(pdMS_TO_TICKS(props.delay_ms));
-        switch_light();
-        vTaskDelay(pdMS_TO_TICKS(props.delay_ms));
+        switch_light_with_dealy(props.delay_ms); // on
+        switch_light_with_dealy(props.delay_ms); // off
     }
+}
+
+
+void switch_light_with_dealy(int delay){
+    vTaskDelay(pdMS_TO_TICKS(delay));
+    switch_light();
 }
