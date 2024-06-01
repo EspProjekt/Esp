@@ -10,31 +10,66 @@
 #include <esp_http_client.h>
 
 
-#define BLINK_PERIOD (1000)
-#define TICK_DELAY (BLINK_PERIOD / portTICK_PERIOD_MS)
+
 #define WIFI_SSID "WolfnetMesh"
 #define WIFI_PASSWD "koziadupa6666"
 #define API_URL "http://192.168.1.115:5010"
+#define BUTTON_PIN GPIO_NUM_0
+#define LIGHT_PIN GPIO_NUM_2
 #define REGISTERED 200
 #define UNREGISTERED 401
+#define MAIN_LOOP_TICK_DELAY ((1000) / portTICK_PERIOD_MS)
+#define REGISTER_BLINKS_DELAY_MS ((500) / portTICK_PERIOD_MS)
+#define UNREGISTER_BLINKS_DELAY_MS ((250) / portTICK_PERIOD_MS)
+#define REGISTER_BLINKS_COUNT 1
+#define UNREGISTER_BLINKS_COUNT 3
+
+
+
+typedef struct {
+    int next_status;
+    int blinks_count;
+    int delay_ms;
+} blink_data;
+
+
+typedef struct {
+    esp_http_client_handle_t client;
+    int *status_code;
+} http_task_params_t;
+
 
 
 void run_server();
+
 void connect_to_wifi();
+
 void http_request_task(void *pvParameters);
+
 void button_task();
-void blink(int blinks_count, int delay_ms);
+
+void blink(blink_data props);
+
 void switch_light();
-void status_func(char *response_str);
-void light_switch_func(char *response_str);
-void handle_click_cap(int next_status, int *clicks, int *status);
+
+void status_endpoint_func(char *response_str);
+
+void light_switch_endpoint_func(char *response_str);
+
+void handle_click_cap(int *clicks, int *status);
+
 void register_endpoints(httpd_handle_t server, httpd_uri_t* handlers, size_t num_handlers);
 
+blink_data get_blink_properties(int current_status);
+
 esp_err_t status_endpoint(httpd_req_t *request);
+
 esp_err_t light_switch_endpoint(httpd_req_t *request);
+
 esp_err_t endpoint(httpd_req_t *request, void (*func)(char *response_str));
 
 httpd_uri_t* create_endpoints(size_t *num_handlers);
+
 httpd_uri_t create_endpoint_handler(
     httpd_method_t method,
     const char *uri, esp_err_t (*handler)(httpd_req_t *request)
@@ -48,8 +83,10 @@ bool is_light_on = false;
 
 
 
+// MAIN
+
 void app_main(void){
-    gpio_set_direction(GPIO_NUM_2, GPIO_MODE_OUTPUT);
+    gpio_set_direction(LIGHT_PIN, GPIO_MODE_OUTPUT);
     esp_log_level_set(TAG, ESP_LOG_DEBUG);
     connect_to_wifi();
     run_server();
@@ -57,13 +94,15 @@ void app_main(void){
 
 
     while (true){
-        vTaskDelay(TICK_DELAY);
+        vTaskDelay(MAIN_LOOP_TICK_DELAY);
         ESP_LOGE(TAG, "iter: %d", iterations);
         iterations += 1;
     }
 }
 
 
+
+// WIFI 
 
 void connect_to_wifi(){
     wifi_init_config_t wifi_init_cfg = WIFI_INIT_CONFIG_DEFAULT();
@@ -86,6 +125,8 @@ void connect_to_wifi(){
 }
 
 
+
+// HTTP SERVER
 
 void run_server(){
     size_t endpoints_count;
@@ -145,35 +186,25 @@ esp_err_t endpoint(httpd_req_t *request, void (*func)(char *response_str)) {
 
 
 
-esp_err_t status_endpoint(httpd_req_t *request) { return endpoint(request, status_func); }
-esp_err_t light_switch_endpoint(httpd_req_t *request) { return endpoint(request, light_switch_func); }
+esp_err_t status_endpoint(httpd_req_t *request) { return endpoint(request, status_endpoint_func); }
+esp_err_t light_switch_endpoint(httpd_req_t *request) { return endpoint(request, light_switch_endpoint_func); }
 
 
 
-void status_func(char *response_str) {
+void status_endpoint_func(char *response_str) {
     sprintf(response_str, "{\"uptime\":%d, \"light\": %s}", iterations, is_light_on ? "true" : "false");
 }
 
 
 
-void light_switch_func(char *response_str) {
+void light_switch_endpoint_func(char *response_str) {
     switch_light();
     sprintf(response_str, "{\"light\": %s}", is_light_on ? "true" : "false");
 }
 
 
-void switch_light(){
-    is_light_on = !is_light_on;
-    gpio_set_level(GPIO_NUM_2, is_light_on);
-}
 
-
-typedef struct {
-    esp_http_client_handle_t client;
-    int *status_code;
-} http_task_params_t;
-
-
+// HTTP REQUEST
 
 void http_request_task(void *pvParameters) {
     http_task_params_t *params = (http_task_params_t *)pvParameters;
@@ -185,6 +216,7 @@ void http_request_task(void *pvParameters) {
     *params->status_code = esp_http_client_get_status_code(client);
     vTaskDelete(NULL);
 }
+
 
 
 esp_http_client_handle_t create_client(esp_http_client_method_t  method) {
@@ -203,6 +235,8 @@ void add_params(http_task_params_t *params, int status_code, httpd_method_t meth
 
 
 
+// BUTTON
+
 void button_task(){
     int status = 401;
     int clicks = 0;
@@ -215,39 +249,57 @@ void button_task(){
 
     while (true) {
         vTaskDelay(pdMS_TO_TICKS(100));
-        if (gpio_get_level(GPIO_NUM_0) != 0) { continue; }
+        if (gpio_get_level(BUTTON_PIN) != 0) { continue; }
 
         clicks += 1;
-        int next_status = status == REGISTERED ? UNREGISTERED : REGISTERED;
-        
-        ESP_LOGE(TAG, "%d", next_status);
-        handle_click_cap(next_status, &clicks, &status);
+        handle_click_cap(&clicks, &status);
     } 
 }
 
 
 
-void handle_click_cap(int next_status, int *clicks, int *status) {
-    int clicks_int = *clicks;
-    int blinks_count = next_status == REGISTERED ? 1 : 3;
-    int delay_ms = next_status == REGISTERED ? 500 : 250;
-
-    bool is_clcik_cap = clicks_int == 20;
-    if (!is_clcik_cap) { return; }
-
+void handle_click_cap(int *clicks_ptr, int *status_ptr) {
+    int clicks = *clicks_ptr;
+    int status = *status_ptr;
+    
+    if (!(clicks == 20)) { return; }
+    
+    blink_data data = get_blink_properties(status);
     ESP_LOGW(TAG, "click cap reached");
-    blink(blinks_count, delay_ms);
+    blink(data);
 
-    *status = next_status;
-    *clicks = 0;
+    *status_ptr = data.next_status;
+    *clicks_ptr = 0;
 }
 
 
-void blink(int blinks_count, int delay_ms){
-    for (int i = 0; i < blinks_count; i++) {
+
+// LIGHT 
+
+blink_data get_blink_properties(int current_status){
+    bool is_registered = current_status == REGISTERED;
+    
+    return (blink_data){
+        .next_status = is_registered ? UNREGISTERED : REGISTERED,
+        .blinks_count = is_registered ? REGISTER_BLINKS_COUNT : UNREGISTER_BLINKS_COUNT,
+        .delay_ms = is_registered ? REGISTER_BLINKS_DELAY_MS : UNREGISTER_BLINKS_DELAY_MS
+    };
+}
+
+
+
+void switch_light(){
+    is_light_on = !is_light_on;
+    gpio_set_level(LIGHT_PIN, is_light_on);
+}
+
+
+
+void blink(blink_data props){
+    for (int i = 0; i < props.blinks_count; i++) {
         switch_light();
-        vTaskDelay(pdMS_TO_TICKS(delay_ms));
+        vTaskDelay(pdMS_TO_TICKS(props.delay_ms));
         switch_light();
-        vTaskDelay(pdMS_TO_TICKS(delay_ms));
+        vTaskDelay(pdMS_TO_TICKS(props.delay_ms));
     }
 }
