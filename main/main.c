@@ -24,10 +24,12 @@
 #define BUTTON_LOOP_DELAY_MS ((100) / portTICK_PERIOD_MS)
 #define ACTIVATE_BLINKS_COUNT 1
 #define DEACTIVATE_BLINKS_COUNT 3
+#define ERROR_BLINKS_COUNT 5
 #define CLICKS_CAP 20
 #define ALREADY_ACTIVATED 409
 #define ACTIVATED 201
 #define DEACTIVATED 204
+#define REQUEST_ERRROR 0
 
 
 typedef struct {
@@ -92,6 +94,7 @@ bool is_light_on = false;
 bool is_activated = false;
 bool is_wifi_connected = false;
 bool is_request_pending = false;
+bool is_request_error = false;
 
 // MAIN
 
@@ -179,8 +182,8 @@ httpd_uri_t create_endpoint_handler(
 
 
 void register_endpoints(httpd_handle_t server, httpd_uri_t* endpoints, size_t endpoints_count) {
-    for (size_t i = 0; i < endpoints_count; i++) {
-        httpd_register_uri_handler(server, &endpoints[i]);
+    for (size_t i = 0; i < endpoints_count; i++) { 
+        httpd_register_uri_handler(server, &endpoints[i]); 
     }
 }
 
@@ -193,6 +196,7 @@ esp_err_t endpoint(httpd_req_t *request, void (*func)(char *response_str)) {
     ESP_LOGI(TAG, "response: %s", response_str);
     httpd_resp_set_type(request, "application/json");
     httpd_resp_sendstr(request, response_str);
+
     return ESP_OK;
 }
 
@@ -218,7 +222,7 @@ void light_switch_endpoint_func(char *response_str) {
 
 // HTTP REQUEST
 
-void prepare_request_data(char *payload) {
+void prepare_payload(char *payload) {
     sprintf(payload, "{\"name\": \"%s\", \"is_light_on\": %s, \"uptime\": %d}", 
         DEVICE_NAME, 
         is_light_on ? "true" : "false", 
@@ -233,38 +237,50 @@ void http_request_task(void *pvParameters) {
     
     char payload[100];
     is_request_pending = true;
+
     ESP_LOGI(TAG, "Sending HTTP request...");
-    prepare_request_data(payload);
+    prepare_payload(payload);
 
     esp_http_client_set_post_field(client, payload, strlen(payload));
     esp_http_client_perform(client);
 
     int status_code = esp_http_client_get_status_code(client);
+
     handle_status_code(status_code);
     ESP_LOGI(TAG, "HTTP request completed with status %d", status_code);
-
+    
+    is_request_pending = false;
+    is_request_error = false;
+    
     esp_http_client_cleanup(client);
     free(params);
-    is_request_pending = false;
     vTaskDelete(NULL);
+}
+
+
+void change_status(bool new_status, char *msg){
+    is_activated = new_status;
+    ESP_LOGW(TAG, "Device %s !", msg);
 }
 
 
 void handle_status_code(int status_code){
     switch (status_code) {
         case ACTIVATED:
-            is_activated = true;
-            ESP_LOGW(TAG, "Device activated");
+            change_status(true, "activated");
             break;
 
         case DEACTIVATED:
-            is_activated = false;
-            ESP_LOGW(TAG, "Device deactivated");
+            change_status(false, "deactivated");
             break;
 
         case ALREADY_ACTIVATED:
-            is_activated = true;
-            ESP_LOGW(TAG, "Device already registered");
+            change_status(true, "already activated");
+            break;
+
+        case REQUEST_ERRROR:
+            is_request_error = true;
+            ESP_LOGE(TAG, "Unknown status code: %d", status_code);
             break;
     }
 
@@ -336,12 +352,9 @@ void handle_click_cap(int *clicks_ptr) {
     int clicks = *clicks_ptr;
     
     if (!(clicks == CLICKS_CAP)) { return; }
-    
-
     ESP_LOGW(TAG, "click cap reached");
 
     *clicks_ptr = 0;
-
     is_activated ? perform_request(HTTP_METHOD_DELETE) : perform_request(HTTP_METHOD_POST);
 }
 
@@ -351,7 +364,7 @@ void handle_click_cap(int *clicks_ptr) {
 
 blink_data get_blink_properties(){
     return (blink_data){
-        .blinks_count = is_activated ? ACTIVATE_BLINKS_COUNT : DEACTIVATE_BLINKS_COUNT,
+       .blinks_count = is_activated ? ACTIVATE_BLINKS_COUNT : is_request_error ? ERROR_BLINKS_COUNT : DEACTIVATE_BLINKS_COUNT,
         .delay_ms = is_activated ? ACTIVATE_BLINKS_DELAY_MS : DEACTIVATE_BLINKS_DELAY_MS
     };
 }
