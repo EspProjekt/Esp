@@ -11,9 +11,9 @@
 
 
 #define DEVICE_NAME "ALEX"
-#define WIFI_SSID "WolfnetMesh"
-#define WIFI_PASSWD "koziadupa6666"
-#define API_URL "http://192.168.1.111:5000/device"
+#define WIFI_SSID "TechniSchools"
+#define WIFI_PASSWD "TS2023!@%"
+#define API_URL "http://192.168.88.14:5000/device"
 #define CONNECT_ENDPOINT "/activate"
 #define DISCONNECT_ENDPOINT "/deactivate/ip"
 #define BUTTON_PIN GPIO_NUM_0
