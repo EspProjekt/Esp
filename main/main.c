@@ -30,6 +30,7 @@
 #define ACTIVATED 201
 #define DEACTIVATED 204
 #define REQUEST_ERRROR 0
+#define ALREADY_DEACTIVATED 404
 
 
 typedef struct {
@@ -59,7 +60,7 @@ void switch_light();
 
 void switch_light_with_dealy(int delay);
 
-void status_endpoint_func(char *response_str);
+void get_current_status_json(char *response_str);
 
 void light_switch_endpoint_func(char *response_str);
 
@@ -70,6 +71,8 @@ void register_endpoints(httpd_handle_t server, httpd_uri_t* handlers, size_t num
 void add_params(http_task_params_t *params, esp_http_client_method_t method);
 
 void handle_status_code(int status_code);
+
+void perform_request(esp_http_client_method_t method);
 
 blink_data get_blink_properties();
 
@@ -202,12 +205,12 @@ esp_err_t endpoint(httpd_req_t *request, void (*func)(char *response_str)) {
 
 
 
-esp_err_t status_endpoint(httpd_req_t *request) { return endpoint(request, status_endpoint_func); }
+esp_err_t status_endpoint(httpd_req_t *request) { return endpoint(request, get_current_status_json); }
 esp_err_t light_switch_endpoint(httpd_req_t *request) { return endpoint(request, light_switch_endpoint_func); }
 
 
 
-void status_endpoint_func(char *response_str) {
+void get_current_status_json(char *response_str) {
     sprintf(response_str, "{\"uptime\":%d, \"is_light_on\": %s}", iterations, is_light_on ? "true" : "false");
 }
 
@@ -215,7 +218,7 @@ void status_endpoint_func(char *response_str) {
 
 void light_switch_endpoint_func(char *response_str) {
     switch_light();
-    sprintf(response_str, "{\"light\": %s}", is_light_on ? "true" : "false");
+    get_current_status_json(response_str);
 }
 
 
@@ -277,6 +280,11 @@ void handle_status_code(int status_code){
         case ALREADY_ACTIVATED:
             change_status(true, "already activated");
             break;
+
+        case ALREADY_DEACTIVATED:
+            change_status(false, "deactivated");
+            perform_request(HTTP_METHOD_POST); // activate again
+            return;
 
         case REQUEST_ERRROR:
             is_request_error = true;
